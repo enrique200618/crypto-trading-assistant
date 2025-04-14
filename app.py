@@ -4,50 +4,43 @@ import yfinance as yf
 import ta
 from datetime import datetime, timedelta
 
-# Función para descargar datos de criptomonedas
+# Función para obtener los datos de la criptomoneda
 @st.cache_data
 def get_crypto_data(ticker):
     end = datetime.today()
     start = end - timedelta(days=180)
     data = yf.download(ticker, start=start, end=end)
+    # Aseguramos que el índice esté limpio y sin multi-índices
+    data.columns = [col if isinstance(col, str) else col[1] for col in data.columns.values]
     return data
 
 # Añadir indicadores técnicos
 def add_technical_indicators(data):
-    # Asegurar que 'Close' sea un Series 1D
-    if isinstance(data['Close'], pd.DataFrame):
-        close_series = data['Close'].squeeze()
-    else:
-        close_series = data['Close']
-    
+    close_series = data['Close'].squeeze()
+
     if close_series.ndim != 1:
         raise ValueError("La columna 'Close' debe ser un Series de una sola dimensión")
 
-    rsi = ta.momentum.RSIIndicator(close_series, window=14).rsi()
-    ema = ta.trend.EMAIndicator(close_series, window=20).ema_indicator()
-    macd = ta.trend.MACD(close_series).macd()
-
-    data['RSI'] = rsi
-    data['EMA20'] = ema
-    data['MACD'] = macd
+    data['RSI'] = ta.momentum.RSIIndicator(close_series, window=14).rsi()
+    data['EMA20'] = ta.trend.EMAIndicator(close_series, window=20).ema_indicator()
+    data['MACD'] = ta.trend.MACD(close_series).macd()
     return data
 
-# Estrategia de trading simple
+# Lógica de trading simple
 def trading_signal(data):
-    if data['RSI'].iloc[-1] < 30 and data['Close'].iloc[-1] > data['EMA20'].iloc[-1]:
+    latest = data.iloc[-1]
+    if latest['RSI'] < 30 and latest['Close'] > latest['EMA20']:
         return "COMPRAR"
-    elif data['RSI'].iloc[-1] > 70 and data['Close'].iloc[-1] < data['EMA20'].iloc[-1]:
+    elif latest['RSI'] > 70 and latest['Close'] < latest['EMA20']:
         return "VENDER"
     else:
         return "MANTENER"
 
-# Streamlit UI
-st.set_page_config(page_title="Crypto Trading Assistant", layout="centered")
-st.title("🤖 Asistente de Trading Cripto (Corto Plazo)")
+# Configuración de la app
+st.set_page_config(page_title="Asistente de Trading Cripto", layout="centered")
+st.title("📊 Asistente de Trading Cripto (Corto Plazo)")
 
-st.markdown("Este asistente analiza criptomonedas y recomienda **comprar**, **mantener** o **vender** según indicadores técnicos.")
-
-# Criptomonedas populares para mostrar
+# Lista de criptomonedas
 cryptos = {
     "Bitcoin (BTC)": "BTC-USD",
     "Ethereum (ETH)": "ETH-USD",
@@ -56,22 +49,27 @@ cryptos = {
     "Ripple (XRP)": "XRP-USD"
 }
 
-selected = st.selectbox("Selecciona una criptomoneda", list(cryptos.keys()))
+seleccion = st.selectbox("Selecciona una criptomoneda", list(cryptos.keys()))
+ticker = cryptos[seleccion]
 
-# Obtener datos
-ticker = cryptos[selected]
+# Obtener datos y mostrar resultados
 data = get_crypto_data(ticker)
 data = add_technical_indicators(data)
 signal = trading_signal(data)
 
-# Mostrar datos y señal
-st.subheader(f"Señal para {selected}:")
+# Mostrar señal
+st.subheader(f"📌 Señal para {seleccion}")
 if signal == "COMPRAR":
-    st.success("📈 Señal: COMPRAR")
+    st.success("📈 Señal actual: COMPRAR")
 elif signal == "VENDER":
-    st.error("📉 Señal: VENDER")
+    st.error("📉 Señal actual: VENDER")
 else:
-    st.info("⏳ Señal: MANTENER")
+    st.info("⏳ Señal actual: MANTENER")
 
+# Mostrar gráficos
+st.subheader("📉 Gráfico de precios y EMA20")
 st.line_chart(data[['Close', 'EMA20']])
+
+st.subheader("📊 RSI y MACD")
 st.line_chart(data[['RSI', 'MACD']])
+
