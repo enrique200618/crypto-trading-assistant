@@ -1,76 +1,61 @@
 import streamlit as st
-import pandas as pd
 import yfinance as yf
+import pandas as pd
 import ta
-import matplotlib.pyplot as plt
 
-# Título de la aplicación
-st.title("Asistente de Trading de Criptomonedas")
+# ====== Función para obtener datos ======
+def get_crypto_data(symbol, period='90d', interval='1h'):
+    df = yf.download(tickers=symbol, period=period, interval=interval)
+    if df.empty:
+        raise ValueError(f"No se pudo obtener datos para {symbol}")
+    df = df[['Close']].copy()  # Solo usamos la columna 'Close'
+    df.dropna(inplace=True)
+    return df
 
-# Lista de criptomonedas populares
-cryptos = {
-    "Bitcoin": "BTC-USD",
-    "Ethereum": "ETH-USD",
-    "Binance Coin": "BNB-USD",
-    "Solana": "SOL-USD",
-    "Cardano": "ADA-USD"
-}
-
-# Selección de criptomoneda
-crypto_name = st.selectbox("Selecciona una criptomoneda", list(cryptos.keys()))
-crypto_symbol = cryptos[crypto_name]
-
-# Rango de fechas
-start_date = st.date_input("Desde", pd.to_datetime("2023-01-01"))
-end_date = st.date_input("Hasta", pd.to_datetime("today"))
-
-# Obtener datos
-@st.cache_data
-def get_crypto_data(symbol, start, end):
-    return yf.download(symbol, start=start, end=end)
-
-data = get_crypto_data(crypto_symbol, start_date, end_date)
-
-# Verificamos que hay datos
-if data.empty:
-    st.error("No se pudieron obtener los datos de esta criptomoneda.")
-    st.stop()
-
-# Añadir indicadores técnicos
+# ====== Añadir indicadores ======
 def add_technical_indicators(data):
-    close_data = data['Close']  # Asegúrate de que sea un Series
-    rsi = ta.momentum.RSIIndicator(close_data, window=14).rsi()
-    ema = ta.trend.EMAIndicator(close_data, window=14).ema_indicator()
-    data['RSI'] = rsi
-    data['EMA'] = ema
+    if 'Close' not in data.columns:
+        raise ValueError("La columna 'Close' no está en los datos")
+
+    close_series = data['Close']
+    if not isinstance(close_series, pd.Series):
+        raise ValueError("La columna 'Close' debe ser un Series 1D")
+
+    data['RSI'] = ta.momentum.RSIIndicator(close_series, window=14).rsi()
+    data['EMA'] = ta.trend.EMAIndicator(close_series, window=14).ema_indicator()
+    data.dropna(inplace=True)
     return data
 
-data = add_technical_indicators(data)
+# ====== Señal de compra/venta ======
+def get_signal(data):
+    last_rsi = data['RSI'].iloc[-1]
+    last_price = data['Close'].iloc[-1]
+    last_ema = data['EMA'].iloc[-1]
 
-# Mostrar datos
-st.subheader("Datos históricos")
-st.dataframe(data.tail())
+    if last_rsi < 30 and last_price > last_ema:
+        return "Comprar"
+    elif last_rsi > 70 and last_price < last_ema:
+        return "Vender"
+    else:
+        return "Sin señal"
 
-# Visualizar precios y EMA
-st.subheader("Precio vs. EMA")
-fig, ax = plt.subplots()
-ax.plot(data.index, data['Close'], label='Precio Cierre')
-ax.plot(data.index, data['EMA'], label='EMA 14', linestyle='--')
-ax.set_title(f"{crypto_name} Precio y EMA")
-ax.legend()
-st.pyplot(fig)
+# ====== Interfaz con Streamlit ======
+st.title("Asistente de Trading Cripto 📈")
+st.markdown("Analiza RSI y EMA para recomendar **Comprar** o **Vender** en criptomonedas.")
 
-# Estrategia simple de compra/venta
-st.subheader("Recomendación de Trading")
-latest_rsi = data['RSI'].iloc[-1]
-latest_price = data['Close'].iloc[-1]
-latest_ema = data['EMA'].iloc[-1]
+cryptos = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'AVAX-USD']
+selected = st.selectbox("Selecciona una criptomoneda:", cryptos)
 
-if latest_rsi < 30 and latest_price > latest_ema:
-    st.success("📈 Señal de COMPRA: RSI bajo y el precio está sobre la EMA")
-elif latest_rsi > 70 and latest_price < latest_ema:
-    st.error("📉 Señal de VENTA: RSI alto y el precio está por debajo de la EMA")
-else:
-    st.info("🤔 Sin señal clara de compra o venta.")
+try:
+    data = get_crypto_data(selected)
+    data = add_technical_indicators(data)
+    signal = get_signal(data)
 
+    st.subheader(f"Recomendación para {selected}")
+    st.write(f"**{signal}**")
 
+    st.line_chart(data[['Close', 'EMA']])
+    st.area_chart(data[['RSI']])
+
+except Exception as e:
+    st.error(f"Ocurrió un error: {str(e)}")
