@@ -1,61 +1,77 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 import ta
+from datetime import datetime, timedelta
 
-# ====== Función para obtener datos ======
-def get_crypto_data(symbol, period='90d', interval='1h'):
-    df = yf.download(tickers=symbol, period=period, interval=interval)
-    if df.empty:
-        raise ValueError(f"No se pudo obtener datos para {symbol}")
-    df = df[['Close']].copy()  # Solo usamos la columna 'Close'
-    df.dropna(inplace=True)
-    return df
-
-# ====== Añadir indicadores ======
-def add_technical_indicators(data):
-    if 'Close' not in data.columns:
-        raise ValueError("La columna 'Close' no está en los datos")
-
-    close_series = data['Close']
-    if not isinstance(close_series, pd.Series):
-        raise ValueError("La columna 'Close' debe ser un Series 1D")
-
-    data['RSI'] = ta.momentum.RSIIndicator(close_series, window=14).rsi()
-    data['EMA'] = ta.trend.EMAIndicator(close_series, window=14).ema_indicator()
-    data.dropna(inplace=True)
+# Función para descargar datos de criptomonedas
+@st.cache_data
+def get_crypto_data(ticker):
+    end = datetime.today()
+    start = end - timedelta(days=180)
+    data = yf.download(ticker, start=start, end=end)
     return data
 
-# ====== Señal de compra/venta ======
-def get_signal(data):
-    last_rsi = data['RSI'].iloc[-1]
-    last_price = data['Close'].iloc[-1]
-    last_ema = data['EMA'].iloc[-1]
-
-    if last_rsi < 30 and last_price > last_ema:
-        return "Comprar"
-    elif last_rsi > 70 and last_price < last_ema:
-        return "Vender"
+# Añadir indicadores técnicos
+def add_technical_indicators(data):
+    # Asegurar que 'Close' sea un Series 1D
+    if isinstance(data['Close'], pd.DataFrame):
+        close_series = data['Close'].squeeze()
     else:
-        return "Sin señal"
+        close_series = data['Close']
+    
+    if close_series.ndim != 1:
+        raise ValueError("La columna 'Close' debe ser un Series de una sola dimensión")
 
-# ====== Interfaz con Streamlit ======
-st.title("Asistente de Trading Cripto 📈")
-st.markdown("Analiza RSI y EMA para recomendar **Comprar** o **Vender** en criptomonedas.")
+    rsi = ta.momentum.RSIIndicator(close_series, window=14).rsi()
+    ema = ta.trend.EMAIndicator(close_series, window=20).ema_indicator()
+    macd = ta.trend.MACD(close_series).macd()
 
-cryptos = ['BTC-USD', 'ETH-USD', 'SOL-USD', 'AVAX-USD']
-selected = st.selectbox("Selecciona una criptomoneda:", cryptos)
+    data['RSI'] = rsi
+    data['EMA20'] = ema
+    data['MACD'] = macd
+    return data
 
-try:
-    data = get_crypto_data(selected)
-    data = add_technical_indicators(data)
-    signal = get_signal(data)
+# Estrategia de trading simple
+def trading_signal(data):
+    if data['RSI'].iloc[-1] < 30 and data['Close'].iloc[-1] > data['EMA20'].iloc[-1]:
+        return "COMPRAR"
+    elif data['RSI'].iloc[-1] > 70 and data['Close'].iloc[-1] < data['EMA20'].iloc[-1]:
+        return "VENDER"
+    else:
+        return "MANTENER"
 
-    st.subheader(f"Recomendación para {selected}")
-    st.write(f"**{signal}**")
+# Streamlit UI
+st.set_page_config(page_title="Crypto Trading Assistant", layout="centered")
+st.title("🤖 Asistente de Trading Cripto (Corto Plazo)")
 
-    st.line_chart(data[['Close', 'EMA']])
-    st.area_chart(data[['RSI']])
+st.markdown("Este asistente analiza criptomonedas y recomienda **comprar**, **mantener** o **vender** según indicadores técnicos.")
 
-except Exception as e:
-    st.error(f"Ocurrió un error: {str(e)}")
+# Criptomonedas populares para mostrar
+cryptos = {
+    "Bitcoin (BTC)": "BTC-USD",
+    "Ethereum (ETH)": "ETH-USD",
+    "Solana (SOL)": "SOL-USD",
+    "Cardano (ADA)": "ADA-USD",
+    "Ripple (XRP)": "XRP-USD"
+}
+
+selected = st.selectbox("Selecciona una criptomoneda", list(cryptos.keys()))
+
+# Obtener datos
+ticker = cryptos[selected]
+data = get_crypto_data(ticker)
+data = add_technical_indicators(data)
+signal = trading_signal(data)
+
+# Mostrar datos y señal
+st.subheader(f"Señal para {selected}:")
+if signal == "COMPRAR":
+    st.success("📈 Señal: COMPRAR")
+elif signal == "VENDER":
+    st.error("📉 Señal: VENDER")
+else:
+    st.info("⏳ Señal: MANTENER")
+
+st.line_chart(data[['Close', 'EMA20']])
+st.line_chart(data[['RSI', 'MACD']])
