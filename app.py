@@ -1,70 +1,63 @@
 import yfinance as yf
-import ta
-import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+import ta  # Técnicas de análisis (RSI, SMA, etc.)
+import streamlit as st  # Para crear la app web
 
-# Función para obtener datos históricos de criptomonedas
-def get_crypto_data(crypto_symbol, start_date, end_date):
-    data = yf.download(crypto_symbol, start=start_date, end=end_date)
+# Función para obtener datos históricos de las criptomonedas
+def get_crypto_data(symbol, start_date, end_date):
+    data = yf.download(symbol, start=start_date, end=end_date)
     return data
 
-# Función para añadir indicadores técnicos
+# Añadir indicadores técnicos
 def add_technical_indicators(data):
-    data['RSI'] = ta.momentum.RSIIndicator(close=data['Close'], window=14).rsi()
-    data['SMA_50'] = ta.trend.SMAIndicator(close=data['Close'], window=50).sma_indicator()
+    # Asegurarse de que la columna 'Close' esté en formato unidimensional
+    close_data = data['Close'].values.flatten()
+    
+    # Calculando RSI (Relative Strength Index)
+    rsi = ta.momentum.RSIIndicator(close_data, window=14).rsi()
+    data['RSI'] = rsi
+
+    # Calculando SMA (Simple Moving Average)
+    sma = ta.trend.SMAIndicator(close_data, window=50).sma_indicator()
+    data['SMA50'] = sma
+    
     return data
 
-# Función para generar señales de compra/venta
-def generate_signal(data):
-    last_row = data.dropna().iloc[-1]  # Última fila con datos completos
-    price = last_row['Close']
-    rsi = last_row['RSI']
-    sma50 = last_row['SMA_50']
+# Función para generar recomendaciones de compra/venta
+def generate_recommendations(data):
+    recommendations = []
+    for i in range(len(data)):
+        # Si el RSI es menor a 30 y el precio está por encima de la SMA, es una señal de compra
+        if data['RSI'][i] < 30 and data['Close'][i] > data['SMA50'][i]:
+            recommendations.append('Comprar')
+        # Si el RSI es mayor a 70 y el precio está por debajo de la SMA, es una señal de venta
+        elif data['RSI'][i] > 70 and data['Close'][i] < data['SMA50'][i]:
+            recommendations.append('Vender')
+        else:
+            recommendations.append('Mantener')  # Si no hay una señal clara, mantener la posición
+
+    data['Recomendación'] = recommendations
+    return data
+
+# Función para mostrar las alertas en tiempo real
+def show_alerts(data):
+    last_signal = data['Recomendación'].iloc[-1]  # Obtenemos la última señal
     
-    if rsi < 30 and price > sma50:
-        return "COMPRAR"
-    elif rsi > 70 and price < sma50:
-        return "VENDER"
+    if last_signal == 'Comprar':
+        st.markdown(f"### 🚨 **¡Es momento de comprar!** 🚨")
+    elif last_signal == 'Vender':
+        st.markdown(f"### 🚨 **¡Es momento de vender!** 🚨")
     else:
-        return "MANTENER"
+        st.markdown(f"### **Mantener** por el momento. No hay señal clara.")
 
-# Lista de criptomonedas a evaluar
-cryptos = ["BTC-USD", "ETH-USD", "BNB-USD", "ADA-USD", "SOL-USD"]
+# Ejemplo de uso con una criptomoneda (Bitcoin, por ejemplo)
+crypto_data = get_crypto_data("BTC-USD", "2023-01-01", "2024-01-01")
+crypto_data_with_indicators = add_technical_indicators(crypto_data)
+crypto_data_with_recommendations = generate_recommendations(crypto_data_with_indicators)
 
-# Rango de fechas: últimos 180 días
-end_date = datetime.today().strftime('%Y-%m-%d')
-start_date = (datetime.today() - timedelta(days=180)).strftime('%Y-%m-%d')
+# Mostrar las alertas en tiempo real
+st.title("Crypto Trading Assistant")
+show_alerts(crypto_data_with_recommendations)
 
-# Configuración de la app web
-st.title("🧠 Asistente de Trading de Criptomonedas")
-st.write("A continuación se muestran las recomendaciones de compra/venta para las criptomonedas seleccionadas.")
-
-# Resultados de las señales de trading
-results = []
-for crypto in cryptos:
-    try:
-        data = get_crypto_data(crypto, start_date, end_date)
-        
-        if data.empty:
-            results.append((crypto, "Sin datos"))
-            continue
-        
-        data = add_technical_indicators(data)
-        signal = generate_signal(data)
-        results.append((crypto, signal))
-    except Exception as e:
-        results.append((crypto, f"Error: {e}"))
-
-# Mostrar las recomendaciones
-df_signals = pd.DataFrame(results, columns=["Cripto", "Recomendación"])
-st.write(df_signals)
-
-# Mostrar gráficos interactivos para cada criptomoneda
-for crypto in cryptos:
-    try:
-        data = get_crypto_data(crypto, start_date, end_date)
-        st.write(f"### Gráfico de {crypto}")
-        st.line_chart(data['Close'])
-    except Exception as e:
-        st.write(f"Error al mostrar gráfico para {crypto}: {e}")
+# Mostrar la tabla con los datos e indicadores
+st.write(crypto_data_with_recommendations[['Close', 'RSI', 'SMA50', 'Recomendación']].tail())
